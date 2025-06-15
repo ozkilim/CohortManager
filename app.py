@@ -39,19 +39,55 @@ st.markdown("""
 def generate_dummy_data(num_patients=50):
     """Generate dummy clinical data for demonstration"""
     
-    # Define clinical fields
-    clinical_fields = [
-        'Demographics', 'Age', 'Gender', 'BMI', 'Smoking_History',
-        'Medical_History', 'Hypertension', 'Diabetes', 'Heart_Disease',
-        'Lab_Results', 'Hemoglobin', 'White_Blood_Cells', 'Platelets',
-        'Imaging', 'CT_Scan', 'MRI', 'X_Ray', 'Ultrasound',
-        'Pathology', 'Biopsy_Results', 'Tumor_Grade', 'Tumor_Stage',
-        'Treatment', 'Surgery', 'Chemotherapy', 'Radiation',
-        'Follow_up', 'Response', 'Survival_Status', 'Last_Visit'
-    ]
+    # Define clinical fields with their characteristic colors
+    clinical_fields_colors = {
+        'Demographics': '#FF6B6B',      # Red
+        'Age': '#FF8E8E', 
+        'Gender': '#FFAAAA',
+        'BMI': '#FFCCCC',
+        'Medical_History': '#4ECDC4',   # Teal
+        'Hypertension': '#6DD4CC',
+        'Diabetes': '#8ADDD4',
+        'Heart_Disease': '#A7E6DD',
+        'Lab_Results': '#45B7D1',       # Blue
+        'Hemoglobin': '#6BC4DA',
+        'White_Blood_Cells': '#8ED1E3',
+        'Platelets': '#B1DEEC',
+        'Imaging': '#96CEB4',           # Green
+        'CT_Scan': '#A8D5BC',
+        'MRI': '#BADCC4',
+        'X_Ray': '#CCE3CC',
+        'Pathology': '#FECA57',         # Yellow/Orange
+        'Biopsy_Results': '#FED470',
+        'Tumor_Grade': '#FEDD89',
+        'Tumor_Stage': '#FEE6A2',
+        'Treatment': '#A8E6CF',         # Light Green
+        'Surgery': '#B5EAD7',
+        'Chemotherapy': '#C2EDDF',
+        'Radiation': '#CFF0E7',
+        'Follow_up': '#DDA0DD',         # Purple
+        'Response': '#E6B3E6',
+        'Survival_Status': '#EFC6EF',
+        'Last_Visit': '#F8D9F8'
+    }
     
-    # Generate patient IDs
-    patient_ids = [f"P_{i:03d}" for i in range(1, num_patients + 1)]
+    clinical_fields = list(clinical_fields_colors.keys())
+    
+    # Define 3 sites and distribute patients
+    sites = ['Site_A', 'Site_B', 'Site_C']
+    patients_per_site = num_patients // 3
+    remainder = num_patients % 3
+    
+    # Generate patient IDs with site information
+    patient_ids = []
+    site_info = []
+    
+    for i, site in enumerate(sites):
+        site_patients = patients_per_site + (1 if i < remainder else 0)
+        for j in range(site_patients):
+            patient_id = f"{site}_P{j+1:03d}"
+            patient_ids.append(patient_id)
+            site_info.append(site)
     
     # Create data availability matrix (1 = data available, 0 = missing)
     np.random.seed(42)  # For reproducible results
@@ -79,49 +115,116 @@ def generate_dummy_data(num_patients=50):
     # Convert to DataFrame
     df = pd.DataFrame(data_matrix, index=clinical_fields, columns=patient_ids)
     
-    return df
+    return df, clinical_fields_colors, site_info
 
-def create_availability_heatmap(df):
-    """Create an interactive heatmap showing data availability"""
+def create_availability_heatmap(df, field_colors, site_info):
+    """Create an interactive heatmap showing data availability with characteristic colors"""
     
-    # Create the heatmap
-    fig = go.Figure(data=go.Heatmap(
-        z=df.values,
-        x=df.columns,
-        y=df.index,
-        colorscale=[[0, '#ffcccc'], [1, '#2ecc71']],  # Light red for missing, green for available
-        showscale=True,
-        colorbar=dict(
-            title="Data Availability",
-            tickvals=[0, 1],
-            ticktext=["Missing", "Available"],
-            len=0.5
-        ),
-        hoverongaps=False,
-        hovertemplate='<b>Patient:</b> %{x}<br><b>Field:</b> %{y}<br><b>Status:</b> %{customdata}<extra></extra>',
-        customdata=[["Available" if val == 1 else "Missing" for val in row] for row in df.values]
-    ))
+    # Create custom colorscale data for each row
+    fig = go.Figure()
+    
+    # Group patients by site for visual separation
+    sites = ['Site_A', 'Site_B', 'Site_C']
+    site_positions = {}
+    current_pos = 0
+    
+    for site in sites:
+        site_patients = [col for col in df.columns if col.startswith(site)]
+        if site_patients:
+            site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
+            current_pos += len(site_patients)
+    
+    # Create the main heatmap with custom colors
+    z_values = []
+    colors = []
+    hover_text = []
+    
+    for i, field in enumerate(df.index):
+        field_color = field_colors[field]
+        row_colors = []
+        row_hover = []
+        
+        for j, patient in enumerate(df.columns):
+            if df.iloc[i, j] == 1:  # Data available
+                row_colors.append(field_color)
+                status = "Available"
+            else:  # Data missing
+                row_colors.append('#000000')  # Black for missing
+                status = "Missing"
+            
+            row_hover.append(f"Patient: {patient}<br>Field: {field}<br>Status: {status}")
+        
+        colors.append(row_colors)
+        hover_text.append(row_hover)
+    
+    # Create individual traces for each row to have different colors
+    for i, field in enumerate(df.index):
+        # Convert row data to show field-specific colors
+        row_data = []
+        for j, patient in enumerate(df.columns):
+            if df.iloc[i, j] == 1:  # Available - use field color
+                row_data.append(1)
+            else:  # Missing - will be black
+                row_data.append(0)
+        
+        fig.add_trace(go.Heatmap(
+            z=[row_data],
+            x=df.columns,
+            y=[field],
+            colorscale=[[0, '#000000'], [1, field_colors[field]]],  # Black to field color
+            showscale=False,
+            hoverongaps=False,
+            hovertemplate=f'<b>Patient:</b> %{{x}}<br><b>Field:</b> {field}<br><b>Status:</b> %{{customdata}}<extra></extra>',
+            customdata=[["Available" if val == 1 else "Missing" for val in row_data]]
+        ))
+    
+    # Add vertical lines to separate sites
+    shapes = []
+    for i, site in enumerate(sites[:-1]):  # Don't add line after last site
+        if site in site_positions:
+            x_pos = site_positions[site][1] + 0.5
+            shapes.append(dict(
+                type="line",
+                x0=x_pos, x1=x_pos,
+                y0=-0.5, y1=len(df.index) - 0.5,
+                line=dict(color="white", width=3)
+            ))
     
     fig.update_layout(
         title={
-            'text': 'Clinical Data Availability Matrix',
+            'text': 'Clinical Data Availability Matrix by Site',
             'x': 0.5,
             'xanchor': 'center',
             'font': {'size': 20}
         },
         xaxis=dict(
-            title="Patients",
+            title="Patients (grouped by site)",
             tickangle=45,
             side='bottom'
         ),
         yaxis=dict(
             title="Clinical Fields",
-            tickmode='linear'
+            tickmode='linear',
+            autorange='reversed'  # Keep fields in original order
         ),
-        width=1200,
+        width=1400,
         height=800,
-        margin=dict(l=200, r=100, t=100, b=150)
+        margin=dict(l=200, r=100, t=100, b=150),
+        shapes=shapes
     )
+    
+    # Add site annotations
+    for site, (start, end) in site_positions.items():
+        fig.add_annotation(
+            x=(start + end) / 2,
+            y=len(df.index),
+            text=f"<b>{site}</b>",
+            showarrow=False,
+            font=dict(size=14, color="black"),
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="black",
+            borderwidth=1
+        )
     
     return fig
 
@@ -176,9 +279,14 @@ def main():
         # Generate or load cached data
         if 'cohort_data' not in st.session_state or st.sidebar.button("Regenerate Data"):
             with st.spinner("Generating dummy clinical data..."):
-                st.session_state.cohort_data = generate_dummy_data(num_patients)
+                df, field_colors, site_info = generate_dummy_data(num_patients)
+                st.session_state.cohort_data = df
+                st.session_state.field_colors = field_colors
+                st.session_state.site_info = site_info
         
         df = st.session_state.cohort_data
+        field_colors = st.session_state.field_colors
+        site_info = st.session_state.site_info
         
     else:
         data_directory = st.sidebar.text_input(
@@ -192,17 +300,22 @@ def main():
             # For now, fall back to dummy data
             # In a real implementation, you would load actual data here
             if 'cohort_data' not in st.session_state:
-                st.session_state.cohort_data = generate_dummy_data(50)
+                df, field_colors, site_info = generate_dummy_data(50)
+                st.session_state.cohort_data = df
+                st.session_state.field_colors = field_colors
+                st.session_state.site_info = site_info
             df = st.session_state.cohort_data
+            field_colors = st.session_state.field_colors
+            site_info = st.session_state.site_info
         else:
             st.sidebar.warning("Please provide a valid directory path")
-            df = generate_dummy_data(20)  # Small default dataset
+            df, field_colors, site_info = generate_dummy_data(20)  # Small default dataset
     
     # Calculate statistics
     stats = calculate_statistics(df)
     
     # Main content area
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric(
@@ -217,12 +330,25 @@ def main():
         )
     
     with col3:
+        # Count patients per site
+        site_counts = {}
+        for col in df.columns:
+            site = col.split('_')[0] + '_' + col.split('_')[1]
+            site_counts[site] = site_counts.get(site, 0) + 1
+        
+        st.metric(
+            label="Sites",
+            value=len(site_counts),
+            delta=f"A:{site_counts.get('Site_A', 0)}, B:{site_counts.get('Site_B', 0)}, C:{site_counts.get('Site_C', 0)}"
+        )
+    
+    with col4:
         st.metric(
             label="Overall Completeness",
             value=f"{stats['overall_completeness']:.1f}%"
         )
     
-    with col4:
+    with col5:
         st.metric(
             label="Available Data Points",
             value=f"{stats['available_cells']:,} / {stats['total_cells']:,}"
@@ -239,22 +365,27 @@ def main():
         show_patient_stats = st.checkbox("Show Patient Statistics", value=True)
         show_field_stats = st.checkbox("Show Field Statistics", value=True)
         
-        # Color scheme selection
-        color_scheme = st.selectbox(
-            "Color Scheme",
-            ["Green/Red", "Blue/Gray", "Purple/Orange"],
-            help="Choose color scheme for the heatmap"
-        )
+        # Show color legend
+        st.subheader("Field Colors")
+        color_groups = {
+            "Demographics": ["Demographics", "Age", "Gender", "BMI"],
+            "Medical History": ["Medical_History", "Hypertension", "Diabetes", "Heart_Disease"],
+            "Lab Results": ["Lab_Results", "Hemoglobin", "White_Blood_Cells", "Platelets"],
+            "Imaging": ["Imaging", "CT_Scan", "MRI", "X_Ray"],
+            "Pathology": ["Pathology", "Biopsy_Results", "Tumor_Grade", "Tumor_Stage"],
+            "Treatment": ["Treatment", "Surgery", "Chemotherapy", "Radiation"],
+            "Follow-up": ["Follow_up", "Response", "Survival_Status", "Last_Visit"]
+        }
+        
+        for group_name in color_groups:
+            with st.expander(f"{group_name} Fields"):
+                for field in color_groups[group_name]:
+                    if field in field_colors:
+                        st.markdown(f'<div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
     
     with col1:
         # Create and display the heatmap
-        fig = create_availability_heatmap(df)
-        
-        # Update color scheme if needed
-        if color_scheme == "Blue/Gray":
-            fig.data[0].colorscale = [[0, '#d3d3d3'], [1, '#1f77b4']]
-        elif color_scheme == "Purple/Orange":
-            fig.data[0].colorscale = [[0, '#ffd700'], [1, '#9932cc']]
+        fig = create_availability_heatmap(df, field_colors, site_info)
         
         st.plotly_chart(fig, use_container_width=True)
     
