@@ -89,9 +89,10 @@ def generate_dummy_data(num_patients=50):
             patient_ids.append(patient_id)
             site_info.append(site)
     
-    # Create data availability matrix (1 = data available, 0 = missing)
+    # Create data availability matrix AND actual data values
     np.random.seed(42)  # For reproducible results
-    data_matrix = []
+    availability_matrix = []
+    actual_data = {}
     
     for field in clinical_fields:
         # Different fields have different availability rates
@@ -109,19 +110,54 @@ def generate_dummy_data(num_patients=50):
             availability = 0.75  # Default availability
         
         # Generate availability for this field
-        field_data = np.random.binomial(1, availability, num_patients)
-        data_matrix.append(field_data)
+        field_availability = np.random.binomial(1, availability, num_patients)
+        availability_matrix.append(field_availability)
+        
+        # Generate actual data values for available fields
+        field_values = []
+        for i, patient_id in enumerate(patient_ids):
+            if field_availability[i] == 1:  # Data available
+                # Generate realistic dummy values based on field type
+                if field in ['Age']:
+                    field_values.append(np.random.randint(18, 90))
+                elif field in ['Gender']:
+                    field_values.append(np.random.choice(['Male', 'Female']))
+                elif field in ['BMI']:
+                    field_values.append(round(np.random.normal(25, 5), 1))
+                elif field in ['Hypertension', 'Diabetes', 'Heart_Disease']:
+                    field_values.append(np.random.choice(['Yes', 'No']))
+                elif field in ['Response']:
+                    field_values.append(np.random.choice(['Complete Response', 'Partial Response', 'Stable Disease', 'Progressive Disease']))
+                elif field in ['Survival_Status']:
+                    field_values.append(np.random.choice(['Alive', 'Deceased']))
+                elif field in ['Tumor_Grade']:
+                    field_values.append(np.random.choice(['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4']))
+                elif field in ['Tumor_Stage']:
+                    field_values.append(np.random.choice(['Stage I', 'Stage II', 'Stage III', 'Stage IV']))
+                elif field in ['Hemoglobin']:
+                    field_values.append(round(np.random.normal(12.5, 2), 1))
+                elif field in ['White_Blood_Cells']:
+                    field_values.append(round(np.random.normal(7.5, 2), 1))
+                elif field in ['Platelets']:
+                    field_values.append(int(np.random.normal(250, 50)))
+                else:
+                    # Default to binary Yes/No for other fields
+                    field_values.append(np.random.choice(['Yes', 'No']))
+            else:
+                field_values.append(np.nan)  # Missing data
+        
+        actual_data[field] = field_values
     
-    # Convert to DataFrame
-    df = pd.DataFrame(data_matrix, index=clinical_fields, columns=patient_ids)
+    # Convert availability to DataFrame
+    availability_df = pd.DataFrame(availability_matrix, index=clinical_fields, columns=patient_ids)
     
-    return df, clinical_fields_colors, site_info
+    # Convert actual data to DataFrame
+    actual_df = pd.DataFrame(actual_data, index=patient_ids).T
+    
+    return availability_df, actual_df, clinical_fields_colors, site_info
 
-def create_availability_heatmap(df, field_colors, site_info):
+def create_availability_heatmap(df, field_colors, site_info, actual_data_df=None):
     """Create an interactive heatmap showing data availability with characteristic colors"""
-    
-    # Create custom colorscale data for each row
-    fig = go.Figure()
     
     # Group patients by site for visual separation
     sites = ['Site_A', 'Site_B', 'Site_C']
@@ -134,48 +170,47 @@ def create_availability_heatmap(df, field_colors, site_info):
             site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
             current_pos += len(site_patients)
     
-    # Create the main heatmap with custom colors
-    z_values = []
-    colors = []
-    hover_text = []
+    # Create the figure using subplots approach for better control
+    fig = make_subplots(rows=1, cols=1)
     
+    # Create separate heatmap for each field to get custom colors
+    # But position them correctly
     for i, field in enumerate(df.index):
         field_color = field_colors[field]
-        row_colors = []
-        row_hover = []
         
-        for j, patient in enumerate(df.columns):
-            if df.iloc[i, j] == 1:  # Data available
-                row_colors.append(field_color)
-                status = "Available"
-            else:  # Data missing
-                row_colors.append('#000000')  # Black for missing
-                status = "Missing"
-            
-            row_hover.append(f"Patient: {patient}<br>Field: {field}<br>Status: {status}")
+        # Get data for this field (row)
+        field_data = df.loc[field].values
         
-        colors.append(row_colors)
-        hover_text.append(row_hover)
-    
-    # Create individual traces for each row to have different colors
-    for i, field in enumerate(df.index):
-        # Convert row data to show field-specific colors
-        row_data = []
-        for j, patient in enumerate(df.columns):
-            if df.iloc[i, j] == 1:  # Available - use field color
-                row_data.append(1)
-            else:  # Missing - will be black
-                row_data.append(0)
+        # Get value counts for hover if actual data is available
+        hover_info = []
+        if actual_data_df is not None and field in actual_data_df.index:
+            field_values = actual_data_df.loc[field].dropna()
+            if len(field_values) > 0:
+                value_counts = field_values.value_counts()
+                value_counts_str = "<br>".join([f"{val}: {count}" for val, count in value_counts.items()])
+                hover_base = f'<b>Field:</b> {field}<br><b>Value Counts:</b><br>{value_counts_str}<br><b>Status:</b> '
+            else:
+                hover_base = f'<b>Field:</b> {field}<br><b>Status:</b> '
+        else:
+            hover_base = f'<b>Field:</b> {field}<br><b>Status:</b> '
+        
+        for j, val in enumerate(field_data):
+            patient = df.columns[j]
+            status = "Available" if val == 1 else "Missing"
+            hover_info.append(f'<b>Patient:</b> {patient}<br>{hover_base}{status}')
+        
+        # Create custom colorscale for this field
+        colorscale = [[0, '#000000'], [1, field_color]]  # Black to field color
         
         fig.add_trace(go.Heatmap(
-            z=[row_data],
+            z=[field_data],  # Single row
             x=df.columns,
-            y=[field],
-            colorscale=[[0, '#000000'], [1, field_colors[field]]],  # Black to field color
+            y=[field],  # Single field name
+            colorscale=colorscale,
             showscale=False,
             hoverongaps=False,
-            hovertemplate=f'<b>Patient:</b> %{{x}}<br><b>Field:</b> {field}<br><b>Status:</b> %{{customdata}}<extra></extra>',
-            customdata=[["Available" if val == 1 else "Missing" for val in row_data]]
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=[hover_info]
         ))
     
     # Add vertical lines to separate sites
@@ -187,7 +222,7 @@ def create_availability_heatmap(df, field_colors, site_info):
                 type="line",
                 x0=x_pos, x1=x_pos,
                 y0=-0.5, y1=len(df.index) - 0.5,
-                line=dict(color="white", width=3)
+                line=dict(color="white", width=4)
             ))
     
     fig.update_layout(
@@ -204,7 +239,6 @@ def create_availability_heatmap(df, field_colors, site_info):
         ),
         yaxis=dict(
             title="Clinical Fields",
-            tickmode='linear',
             autorange='reversed'  # Keep fields in original order
         ),
         width=1400,
@@ -279,12 +313,14 @@ def main():
         # Generate or load cached data
         if 'cohort_data' not in st.session_state or st.sidebar.button("Regenerate Data"):
             with st.spinner("Generating dummy clinical data..."):
-                df, field_colors, site_info = generate_dummy_data(num_patients)
-                st.session_state.cohort_data = df
+                availability_df, actual_df, field_colors, site_info = generate_dummy_data(num_patients)
+                st.session_state.cohort_data = availability_df
+                st.session_state.actual_data = actual_df
                 st.session_state.field_colors = field_colors
                 st.session_state.site_info = site_info
         
         df = st.session_state.cohort_data
+        actual_data_df = st.session_state.actual_data
         field_colors = st.session_state.field_colors
         site_info = st.session_state.site_info
         
@@ -300,22 +336,26 @@ def main():
             # For now, fall back to dummy data
             # In a real implementation, you would load actual data here
             if 'cohort_data' not in st.session_state:
-                df, field_colors, site_info = generate_dummy_data(50)
-                st.session_state.cohort_data = df
+                availability_df, actual_df, field_colors, site_info = generate_dummy_data(50)
+                st.session_state.cohort_data = availability_df
+                st.session_state.actual_data = actual_df
                 st.session_state.field_colors = field_colors
                 st.session_state.site_info = site_info
             df = st.session_state.cohort_data
+            actual_data_df = st.session_state.actual_data
             field_colors = st.session_state.field_colors
             site_info = st.session_state.site_info
         else:
             st.sidebar.warning("Please provide a valid directory path")
-            df, field_colors, site_info = generate_dummy_data(20)  # Small default dataset
+            availability_df, actual_df, field_colors, site_info = generate_dummy_data(20)  # Small default dataset
+            df = availability_df
+            actual_data_df = actual_df
     
     # Calculate statistics
     stats = calculate_statistics(df)
     
     # Main content area
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.metric(
@@ -342,18 +382,6 @@ def main():
             delta=f"A:{site_counts.get('Site_A', 0)}, B:{site_counts.get('Site_B', 0)}, C:{site_counts.get('Site_C', 0)}"
         )
     
-    with col4:
-        st.metric(
-            label="Overall Completeness",
-            value=f"{stats['overall_completeness']:.1f}%"
-        )
-    
-    with col5:
-        st.metric(
-            label="Available Data Points",
-            value=f"{stats['available_cells']:,} / {stats['total_cells']:,}"
-        )
-    
     # Main visualization
     st.subheader("Data Availability Matrix")
     
@@ -361,12 +389,7 @@ def main():
     col1, col2 = st.columns([3, 1])
     
     with col2:
-        st.subheader("Display Options")
-        show_patient_stats = st.checkbox("Show Patient Statistics", value=True)
-        show_field_stats = st.checkbox("Show Field Statistics", value=True)
-        
-        # Show color legend
-        st.subheader("Field Colors")
+        st.subheader("Field Color Legend")
         color_groups = {
             "Demographics": ["Demographics", "Age", "Gender", "BMI"],
             "Medical History": ["Medical_History", "Hypertension", "Diabetes", "Heart_Disease"],
@@ -385,63 +408,221 @@ def main():
     
     with col1:
         # Create and display the heatmap
-        fig = create_availability_heatmap(df, field_colors, site_info)
+        fig = create_availability_heatmap(df, field_colors, site_info, actual_data_df)
         
         st.plotly_chart(fig, use_container_width=True)
     
-    # Additional statistics
-    if show_patient_stats or show_field_stats:
-        st.subheader("Detailed Statistics")
+    # Cohort Builder
+    st.subheader("🔬 Cohort Builder")
+    st.write("Select clinical fields to create a cohort of patients with complete data for **ALL** selected criteria:")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Multi-select for clinical fields
+        available_fields = list(df.index)
+        selected_fields = st.multiselect(
+            "Select Clinical Fields (patients must have data for ALL selected fields):",
+            options=available_fields,
+            default=[],
+            help="Choose multiple fields to create a cohort with complete data for all selected criteria"
+        )
         
-        col1, col2 = st.columns(2)
-        
-        if show_patient_stats:
-            with col1:
-                st.subheader("Patient Completeness")
+        if selected_fields:
+            # Filter patients who have data for ALL selected fields
+            # For each selected field, get patients who have data (value = 1)
+            cohort_patients = None
+            
+            for field in selected_fields:
+                field_patients = set(df.columns[df.loc[field] == 1])
+                if cohort_patients is None:
+                    cohort_patients = field_patients
+                else:
+                    cohort_patients = cohort_patients.intersection(field_patients)
+            
+            cohort_patients = list(cohort_patients)
+            cohort_patients.sort()
+            
+            # Create filtered dataset
+            if cohort_patients:
+                filtered_df = df[cohort_patients]
                 
-                # Create patient completeness chart
-                patient_df = pd.DataFrame({
-                    'Patient': stats['patient_completeness'].index,
-                    'Completeness': stats['patient_completeness'].values
-                })
+                st.success(f"✅ Found **{len(cohort_patients)}** patients with complete data for all selected fields!")
                 
-                fig_patients = px.histogram(
-                    patient_df,
-                    x='Completeness',
-                    nbins=20,
-                    title='Distribution of Patient Data Completeness',
-                    labels={'Completeness': 'Completeness (%)', 'count': 'Number of Patients'}
+                # Show cohort composition by site
+                site_breakdown = {}
+                for patient in cohort_patients:
+                    site = patient.split('_')[0] + '_' + patient.split('_')[1]
+                    site_breakdown[site] = site_breakdown.get(site, 0) + 1
+                
+                st.write("**Cohort by Site:**")
+                for site, count in site_breakdown.items():
+                    st.write(f"• {site}: {count} patients")
+                
+                # Generate structured filename
+                filename_fields = "_".join(selected_fields).replace(" ", "")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                suggested_filename = f"Cohort_{filename_fields}_{timestamp}"
+                
+                st.write("**Selected Patients:**")
+                patients_display = ", ".join(cohort_patients[:10])
+                if len(cohort_patients) > 10:
+                    patients_display += f"... (+{len(cohort_patients) - 10} more)"
+                st.write(patients_display)
+                
+                # Optional Manual Field Labeling Section
+                with st.expander("🏷️ Manual Field Labeling (Optional)", expanded=False):
+                    st.write("Transform categorical values to numeric labels for machine learning:")
+                    
+                    # Initialize field mappings in session state
+                    if 'field_mappings' not in st.session_state:
+                        st.session_state.field_mappings = {}
+                    
+                    # Select field to relabel
+                    relabel_field = st.selectbox(
+                        "Select field to relabel:",
+                        options=["Select a field..."] + selected_fields,
+                        help="Choose a field to map its values to numeric labels"
+                    )
+                    
+                    if relabel_field != "Select a field...":
+                        # Get unique values for this field in the filtered cohort
+                        field_data = actual_data_df.loc[relabel_field, cohort_patients].dropna()
+                        unique_values = sorted(field_data.unique()) if len(field_data) > 0 else []
+                        
+                        if unique_values:
+                            st.write(f"**Current values in '{relabel_field}':**")
+                            
+                            # Create mapping interface
+                            field_key = f"{relabel_field}_{len(cohort_patients)}"  # Unique key
+                            if field_key not in st.session_state.field_mappings:
+                                st.session_state.field_mappings[field_key] = {}
+                            
+                            mapping_changed = False
+                            col_map1, col_map2 = st.columns(2)
+                            
+                            with col_map1:
+                                st.write("**Original Values:**")
+                                for val in unique_values:
+                                    st.write(f"• {val}")
+                            
+                            with col_map2:
+                                st.write("**Map to:**")
+                                for i, val in enumerate(unique_values):
+                                    current_mapping = st.session_state.field_mappings[field_key].get(val, i)
+                                    new_mapping = st.number_input(
+                                        f"Map '{val}' to:",
+                                        value=current_mapping,
+                                        key=f"mapping_{field_key}_{val}",
+                                        help=f"Numeric value for '{val}'"
+                                    )
+                                    
+                                    if new_mapping != st.session_state.field_mappings[field_key].get(val):
+                                        st.session_state.field_mappings[field_key][val] = new_mapping
+                                        mapping_changed = True
+                            
+                            # Show preview of mapping
+                            if st.session_state.field_mappings[field_key]:
+                                st.write("**Mapping Preview:**")
+                                mapping_preview = " | ".join([f"{k}→{v}" for k, v in st.session_state.field_mappings[field_key].items()])
+                                st.code(mapping_preview)
+                                
+                                # Quick preset buttons
+                                col_preset1, col_preset2, col_preset3 = st.columns(3)
+                                with col_preset1:
+                                    if st.button("📊 Binary (0,1)", help="Map first value to 0, second to 1"):
+                                        if len(unique_values) >= 2:
+                                            st.session_state.field_mappings[field_key] = {unique_values[0]: 0, unique_values[1]: 1}
+                                            st.rerun()
+                                
+                                with col_preset2:
+                                    if st.button("🔢 Sequential (0,1,2...)", help="Map values to sequential numbers"):
+                                        st.session_state.field_mappings[field_key] = {val: i for i, val in enumerate(unique_values)}
+                                        st.rerun()
+                                
+                                with col_preset3:
+                                    if st.button("🧹 Clear Mapping", help="Reset all mappings"):
+                                        st.session_state.field_mappings[field_key] = {}
+                                        st.rerun()
+                        else:
+                            st.warning(f"No data available for field '{relabel_field}' in selected cohort.")
+                
+            else:
+                st.warning("⚠️ No patients found with complete data for all selected fields.")
+                filtered_df = None
+                suggested_filename = None
+    
+    with col2:
+        if selected_fields and cohort_patients:
+            st.subheader("📥 Export Cohort")
+            
+            # Summary statistics
+            st.metric("Total Patients", len(cohort_patients))
+            st.metric("Data Fields", len(selected_fields))
+            
+            # Show active field mappings
+            active_mappings = {k: v for k, v in st.session_state.get('field_mappings', {}).items() if v}
+            if active_mappings:
+                st.metric("Active Mappings", len(active_mappings), help="Number of fields with custom label mappings")
+            
+            # Custom filename input
+            custom_filename = st.text_input(
+                "Filename:",
+                value=suggested_filename,
+                help="Customize the filename for your cohort export"
+            )
+            
+            # Export format and download in one step
+            col_csv, col_json, col_excel = st.columns(3)
+            
+            # Create the export dataframe with actual values
+            export_df = actual_data_df[cohort_patients].loc[selected_fields]
+            
+            # Apply field mappings if any exist
+            for field_key, mapping in st.session_state.get('field_mappings', {}).items():
+                if mapping:  # Only if mapping is not empty
+                    field_name = field_key.split('_')[0]  # Extract field name from key
+                    if field_name in export_df.index and len(mapping) > 0:
+                        # Apply the mapping
+                        export_df.loc[field_name] = export_df.loc[field_name].map(mapping).fillna(export_df.loc[field_name])
+            
+            with col_csv:
+                csv_content = export_df.to_csv()
+                st.download_button(
+                    label="📄 CSV",
+                    data=csv_content,
+                    file_name=f"{custom_filename}.csv",
+                    mime="text/csv",
+                    type="primary"
                 )
-                
-                st.plotly_chart(fig_patients, use_container_width=True)
-                
-                # Show patients with lowest completeness
-                worst_patients = stats['patient_completeness'].nsmallest(5)
-                st.write("**Patients with Lowest Completeness:**")
-                for patient, completeness in worst_patients.items():
-                    st.write(f"• {patient}: {completeness:.1f}%")
-        
-        if show_field_stats:
-            with col2:
-                st.subheader("Field Completeness")
-                
-                # Create field completeness chart
-                field_df = pd.DataFrame({
-                    'Field': stats['field_completeness'].index,
-                    'Completeness': stats['field_completeness'].values
-                })
-                
-                fig_fields = px.bar(
-                    field_df.sort_values('Completeness', ascending=True),
-                    x='Completeness',
-                    y='Field',
-                    orientation='h',
-                    title='Field Data Completeness',
-                    labels={'Completeness': 'Completeness (%)', 'Field': 'Clinical Field'}
+            
+            with col_json:
+                json_content = export_df.to_json(orient='records', indent=2)
+                st.download_button(
+                    label="📋 JSON",
+                    data=json_content,
+                    file_name=f"{custom_filename}.json",
+                    mime="application/json"
                 )
+            
+            with col_excel:
+                import io
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    export_df.to_excel(writer, sheet_name='Cohort_Data')
+                excel_content = buffer.getvalue()
                 
-                fig_fields.update_layout(height=600)
-                st.plotly_chart(fig_fields, use_container_width=True)
+                st.download_button(
+                    label="📊 Excel",
+                    data=excel_content,
+                    file_name=f"{custom_filename}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            # Show preview of exported data
+            with st.expander("📋 Data Preview", expanded=False):
+                st.write("First 5 patients from your cohort:")
+                st.dataframe(export_df.iloc[:, :5] if len(export_df.columns) > 5 else export_df)
     
     # Data export options
     st.subheader("Export Options")
