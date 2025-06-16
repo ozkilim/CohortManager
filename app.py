@@ -159,45 +159,51 @@ def generate_dummy_data(num_patients=50):
 def create_availability_heatmap(df, field_colors, site_info, actual_data_df=None):
     """Create an interactive heatmap showing data availability with characteristic colors"""
     
-    # Group patients by site for visual separation
-    sites = ['Site_A', 'Site_B', 'Site_C']
-    site_positions = {}
-    current_pos = 0
-    
-    for site in sites:
-        site_patients = [col for col in df.columns if col.startswith(site)]
-        if site_patients:
-            site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
-            current_pos += len(site_patients)
+    # Determine if we're using real cohort data or dummy data
+    if len(site_info) == len(df.columns):
+        # Real data: group by actual cohorts
+        unique_sites = list(set(site_info))
+        sites = sorted(unique_sites)  # Sort for consistent ordering
+        
+        # Group patients by their actual cohort
+        site_positions = {}
+        current_pos = 0
+        
+        for site in sites:
+            site_patients = [df.columns[i] for i, cohort in enumerate(site_info) if cohort == site]
+            if site_patients:
+                site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
+                current_pos += len(site_patients)
+    else:
+        # Dummy data: use original logic
+        sites = ['Site_A', 'Site_B', 'Site_C']
+        site_positions = {}
+        current_pos = 0
+        
+        for site in sites:
+            site_patients = [col for col in df.columns if col.startswith(site)]
+            if site_patients:
+                site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
+                current_pos += len(site_patients)
     
     # Create the figure using subplots approach for better control
     fig = make_subplots(rows=1, cols=1)
     
     # Create separate heatmap for each field to get custom colors
-    # But position them correctly
     for i, field in enumerate(df.index):
+        if field not in field_colors:
+            continue
         field_color = field_colors[field]
         
         # Get data for this field (row)
         field_data = df.loc[field].values
         
-        # Get value counts for hover if actual data is available
+        # Simple hover info
         hover_info = []
-        if actual_data_df is not None and field in actual_data_df.index:
-            field_values = actual_data_df.loc[field].dropna()
-            if len(field_values) > 0:
-                value_counts = field_values.value_counts()
-                value_counts_str = "<br>".join([f"{val}: {count}" for val, count in value_counts.items()])
-                hover_base = f'<b>Field:</b> {field}<br><b>Value Counts:</b><br>{value_counts_str}<br><b>Status:</b> '
-            else:
-                hover_base = f'<b>Field:</b> {field}<br><b>Status:</b> '
-        else:
-            hover_base = f'<b>Field:</b> {field}<br><b>Status:</b> '
-        
         for j, val in enumerate(field_data):
             patient = df.columns[j]
             status = "Available" if val == 1 else "Missing"
-            hover_info.append(f'<b>Patient:</b> {patient}<br>{hover_base}{status}')
+            hover_info.append(f'<b>Field:</b> {field}<br><b>Patient:</b> {patient}<br><b>Status:</b> {status}')
         
         # Create custom colorscale for this field
         colorscale = [[0, '#000000'], [1, field_color]]  # Black to field color
@@ -285,6 +291,71 @@ def calculate_statistics(df):
         'field_completeness': field_completeness
     }
 
+def load_real_csv_data(csv_path, subsample_size=None):
+    """Load real clinical data from CSV file and convert to availability matrix format"""
+    
+    try:
+        # Load the CSV file
+        df = pd.read_csv(csv_path)
+        
+        # Subsample if requested
+        if subsample_size and subsample_size < len(df):
+            df = df.sample(n=subsample_size, random_state=42).reset_index(drop=True)
+        
+        # Extract case IDs and cohort information
+        case_ids = df['case_id'].astype(str)
+        cohorts = df['cohort']
+        
+        # Get clinical fields (exclude case_id and cohort columns)
+        clinical_fields = [col for col in df.columns if col not in ['case_id', 'cohort']]
+        
+        # Create availability matrix (fields as rows, patients as columns)
+        availability_matrix = []
+        actual_data = {}
+        
+        # Define colors for different clinical field categories
+        field_colors = {
+            'FIGO_stage': '#FF6B6B',           # Red - Staging
+            'Grade': '#FF8E8E',                # Light Red - Grading
+            'HRD_score': '#4ECDC4',           # Teal - Molecular
+            'BRCA_status': '#6DD4CC',         # Light Teal - Genetics
+            'Proteomics_PTMs': '#45B7D1',     # Blue - Proteomics
+            'Transcriptomics_PTMs': '#6BC4DA', # Light Blue - Transcriptomics
+            'Plat_response': '#96CEB4',       # Green - Treatment Response
+            'Neoadjuvant_treatment': '#A8D5BC' # Light Green - Treatment
+        }
+        
+        for field in clinical_fields:
+            # Check availability for each patient (1 if not null/empty, 0 if null/empty)
+            field_data = df[field]
+            availability = []
+            values = []
+            
+            for i, val in enumerate(field_data):
+                # Consider data available if it's not NaN, not empty string, and not just whitespace
+                if pd.isna(val) or str(val).strip() == '' or str(val).strip().lower() == 'nan':
+                    availability.append(0)
+                    values.append(np.nan)
+                else:
+                    availability.append(1)
+                    values.append(val)
+            
+            availability_matrix.append(availability)
+            actual_data[field] = values
+        
+        # Convert to DataFrames
+        availability_df = pd.DataFrame(availability_matrix, index=clinical_fields, columns=case_ids)
+        actual_df = pd.DataFrame(actual_data, index=case_ids).T
+        
+        # Create site information from cohorts
+        site_info = cohorts.tolist()
+        
+        return availability_df, actual_df, field_colors, site_info, cohorts.unique()
+        
+    except Exception as e:
+        st.error(f"Error loading CSV file: {str(e)}")
+        return None, None, None, None, None
+
 def main():
     # Header
     st.markdown('<div class="main-header">🏥 CohortManager</div>', unsafe_allow_html=True)
@@ -296,7 +367,7 @@ def main():
     # Data loading options
     data_source = st.sidebar.selectbox(
         "Data Source",
-        ["Generate Dummy Data", "Load from Directory"],
+        ["Generate Dummy Data", "Load from Directory", "Load Real CSV Data"],
         help="Choose how to load the clinical data"
     )
     
@@ -324,6 +395,86 @@ def main():
         field_colors = st.session_state.field_colors
         site_info = st.session_state.site_info
         
+    elif data_source == "Load Real CSV Data":
+        csv_path = st.sidebar.text_input(
+            "CSV File Path",
+            value="/tank/WSI_data/Ovarian_WSIs/OV_master/master_cohort.csv",
+            help="Path to the CSV file containing clinical data"
+        )
+        
+        # Add subsample option for testing
+        subsample_data = st.sidebar.checkbox(
+            "Subsample for testing",
+            value=False,
+            help="Load only a subset of patients to test visualization performance"
+        )
+        
+        if subsample_data:
+            subsample_size = st.sidebar.slider(
+                "Number of patients to load",
+                min_value=10,
+                max_value=200,
+                value=50,
+                step=10,
+                help="Reduce the number of patients for testing"
+            )
+        else:
+            subsample_size = None
+        
+        if csv_path and os.path.exists(csv_path):
+            st.sidebar.success("CSV file found!")
+            
+            # Check if we need to load/reload the data
+            if ('cohort_data' not in st.session_state or 
+                'csv_path' not in st.session_state or 
+                st.session_state.get('csv_path') != csv_path or 
+                st.session_state.get('subsample_size') != subsample_size or
+                st.sidebar.button("Reload CSV Data")):
+                
+                with st.spinner("Loading real clinical data..."):
+                    # Load real CSV data
+                    result = load_real_csv_data(csv_path, subsample_size)
+                    
+                    if result[0] is not None:  # Check if loading was successful
+                        availability_df, actual_df, field_colors, site_info, cohorts = result
+                        st.session_state.cohort_data = availability_df
+                        st.session_state.actual_data = actual_df
+                        st.session_state.field_colors = field_colors
+                        st.session_state.site_info = site_info
+                        st.session_state.cohorts = cohorts
+                        st.session_state.csv_path = csv_path
+                        st.session_state.subsample_size = subsample_size
+                        sample_text = f" (subsampled from {1031})" if subsample_size else ""
+                        st.sidebar.success(f"✅ Loaded {len(availability_df.columns)} patients{sample_text} with {len(availability_df.index)} clinical fields!")
+                    else:
+                        st.sidebar.error("Failed to load CSV data")
+                        # Fallback to dummy data
+                        availability_df, actual_df, field_colors, site_info = generate_dummy_data(20)
+                        st.session_state.cohort_data = availability_df
+                        st.session_state.actual_data = actual_df
+                        st.session_state.field_colors = field_colors
+                        st.session_state.site_info = site_info
+            
+            # Use cached data
+            df = st.session_state.cohort_data
+            actual_data_df = st.session_state.actual_data
+            field_colors = st.session_state.field_colors
+            site_info = st.session_state.site_info
+            
+        else:
+            st.sidebar.warning("Please provide a valid CSV file path")
+            # Use dummy data as fallback
+            if 'cohort_data' not in st.session_state:
+                availability_df, actual_df, field_colors, site_info = generate_dummy_data(20)
+                st.session_state.cohort_data = availability_df
+                st.session_state.actual_data = actual_df
+                st.session_state.field_colors = field_colors
+                st.session_state.site_info = site_info
+            
+            df = st.session_state.cohort_data
+            actual_data_df = st.session_state.actual_data
+            field_colors = st.session_state.field_colors
+            site_info = st.session_state.site_info
     else:
         data_directory = st.sidebar.text_input(
             "Data Directory Path",
@@ -370,16 +521,28 @@ def main():
         )
     
     with col3:
-        # Count patients per site
-        site_counts = {}
-        for col in df.columns:
-            site = col.split('_')[0] + '_' + col.split('_')[1]
-            site_counts[site] = site_counts.get(site, 0) + 1
+        # Count patients per site/cohort
+        if 'site_info' in st.session_state and len(st.session_state.site_info) == len(df.columns):
+            # Real data: count by actual cohorts
+            site_counts = {}
+            for cohort in st.session_state.site_info:
+                site_counts[cohort] = site_counts.get(cohort, 0) + 1
+            
+            # Create delta string for real cohorts
+            delta_parts = [f"{k}:{v}" for k, v in sorted(site_counts.items())]
+            delta_str = ", ".join(delta_parts)
+        else:
+            # Dummy data: use original logic
+            site_counts = {}
+            for col in df.columns:
+                site = col.split('_')[0] + '_' + col.split('_')[1]
+                site_counts[site] = site_counts.get(site, 0) + 1
+            delta_str = f"A:{site_counts.get('Site_A', 0)}, B:{site_counts.get('Site_B', 0)}, C:{site_counts.get('Site_C', 0)}"
         
         st.metric(
-            label="Sites",
+            label="Sites/Cohorts",
             value=len(site_counts),
-            delta=f"A:{site_counts.get('Site_A', 0)}, B:{site_counts.get('Site_B', 0)}, C:{site_counts.get('Site_C', 0)}"
+            delta=delta_str
         )
     
     # Main visualization
@@ -390,27 +553,42 @@ def main():
     
     with col2:
         st.subheader("Field Color Legend")
-        color_groups = {
-            "Demographics": ["Demographics", "Age", "Gender", "BMI"],
-            "Medical History": ["Medical_History", "Hypertension", "Diabetes", "Heart_Disease"],
-            "Lab Results": ["Lab_Results", "Hemoglobin", "White_Blood_Cells", "Platelets"],
-            "Imaging": ["Imaging", "CT_Scan", "MRI", "X_Ray"],
-            "Pathology": ["Pathology", "Biopsy_Results", "Tumor_Grade", "Tumor_Stage"],
-            "Treatment": ["Treatment", "Surgery", "Chemotherapy", "Radiation"],
-            "Follow-up": ["Follow_up", "Response", "Survival_Status", "Last_Visit"]
-        }
         
-        for group_name in color_groups:
-            with st.expander(f"{group_name} Fields"):
-                for field in color_groups[group_name]:
-                    if field in field_colors:
-                        st.markdown(f'<div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
+        # Check if we have real data or dummy data
+        if data_source == "Load Real CSV Data" and 'field_colors' in st.session_state:
+            # Real data: show actual fields
+            st.write("**Clinical Fields:**")
+            for field in df.index:
+                if field in field_colors:
+                    st.markdown(f'<div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
+        else:
+            # Dummy data: show grouped fields
+            color_groups = {
+                "Demographics": ["Demographics", "Age", "Gender", "BMI"],
+                "Medical History": ["Medical_History", "Hypertension", "Diabetes", "Heart_Disease"],
+                "Lab Results": ["Lab_Results", "Hemoglobin", "White_Blood_Cells", "Platelets"],
+                "Imaging": ["Imaging", "CT_Scan", "MRI", "X_Ray"],
+                "Pathology": ["Pathology", "Biopsy_Results", "Tumor_Grade", "Tumor_Stage"],
+                "Treatment": ["Treatment", "Surgery", "Chemotherapy", "Radiation"],
+                "Follow-up": ["Follow_up", "Response", "Survival_Status", "Last_Visit"]
+            }
+            
+            for group_name in color_groups:
+                with st.expander(f"{group_name} Fields"):
+                    for field in color_groups[group_name]:
+                        if field in field_colors:
+                            st.markdown(f'<div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
     
     with col1:
         # Create and display the heatmap
-        fig = create_availability_heatmap(df, field_colors, site_info, actual_data_df)
-        
-        st.plotly_chart(fig, use_container_width=True)
+        if df is not None and field_colors is not None and site_info is not None:
+            fig = create_availability_heatmap(df, field_colors, site_info, actual_data_df)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.error("Figure creation returned None")
+        else:
+            st.error("Missing data for visualization. Please check data loading.")
     
     # Cohort Builder
     st.subheader("🔬 Cohort Builder")
@@ -449,14 +627,22 @@ def main():
                 
                 st.success(f"✅ Found **{len(cohort_patients)}** patients with complete data for all selected fields!")
                 
-                # Show cohort composition by site
+                # Show cohort composition by site/cohort
                 site_breakdown = {}
-                for patient in cohort_patients:
-                    site = patient.split('_')[0] + '_' + patient.split('_')[1]
-                    site_breakdown[site] = site_breakdown.get(site, 0) + 1
+                if 'site_info' in st.session_state and len(st.session_state.site_info) == len(df.columns):
+                    # Real data: group by actual cohorts
+                    for patient in cohort_patients:
+                        patient_idx = list(df.columns).index(patient)
+                        cohort = st.session_state.site_info[patient_idx]
+                        site_breakdown[cohort] = site_breakdown.get(cohort, 0) + 1
+                else:
+                    # Dummy data: use original logic
+                    for patient in cohort_patients:
+                        site = patient.split('_')[0] + '_' + patient.split('_')[1]
+                        site_breakdown[site] = site_breakdown.get(site, 0) + 1
                 
-                st.write("**Cohort by Site:**")
-                for site, count in site_breakdown.items():
+                st.write("**Cohort by Site/Study:**")
+                for site, count in sorted(site_breakdown.items()):
                     st.write(f"• {site}: {count} patients")
                 
                 # Generate structured filename
