@@ -36,141 +36,38 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def generate_dummy_data(num_patients=50):
-    """Generate dummy clinical data for demonstration"""
-    
-    # Define clinical fields with their characteristic colors
-    clinical_fields_colors = {
-        'Demographics': '#FF6B6B',      # Red
-        'Age': '#FF8E8E', 
-        'Gender': '#FFAAAA',
-        'BMI': '#FFCCCC',
-        'Medical_History': '#4ECDC4',   # Teal
-        'Hypertension': '#6DD4CC',
-        'Diabetes': '#8ADDD4',
-        'Heart_Disease': '#A7E6DD',
-        'Lab_Results': '#45B7D1',       # Blue
-        'Hemoglobin': '#6BC4DA',
-        'White_Blood_Cells': '#8ED1E3',
-        'Platelets': '#B1DEEC',
-        'Imaging': '#96CEB4',           # Green
-        'CT_Scan': '#A8D5BC',
-        'MRI': '#BADCC4',
-        'X_Ray': '#CCE3CC',
-        'Pathology': '#FECA57',         # Yellow/Orange
-        'Biopsy_Results': '#FED470',
-        'Tumor_Grade': '#FEDD89',
-        'Tumor_Stage': '#FEE6A2',
-        'Treatment': '#A8E6CF',         # Light Green
-        'Surgery': '#B5EAD7',
-        'Chemotherapy': '#C2EDDF',
-        'Radiation': '#CFF0E7',
-        'Follow_up': '#DDA0DD',         # Purple
-        'Response': '#E6B3E6',
-        'Survival_Status': '#EFC6EF',
-        'Last_Visit': '#F8D9F8'
-    }
-    
-    clinical_fields = list(clinical_fields_colors.keys())
-    
-    # Define 3 sites and distribute patients
-    sites = ['Site_A', 'Site_B', 'Site_C']
-    patients_per_site = num_patients // 3
-    remainder = num_patients % 3
-    
-    # Generate patient IDs with site information
-    patient_ids = []
-    site_info = []
-    
-    for i, site in enumerate(sites):
-        site_patients = patients_per_site + (1 if i < remainder else 0)
-        for j in range(site_patients):
-            patient_id = f"{site}_P{j+1:03d}"
-            patient_ids.append(patient_id)
-            site_info.append(site)
-    
-    # Create data availability matrix AND actual data values
-    np.random.seed(42)  # For reproducible results
-    availability_matrix = []
-    actual_data = {}
-    
-    for field in clinical_fields:
-        # Different fields have different availability rates
-        if field in ['Demographics', 'Age', 'Gender']:
-            availability = 0.95  # Almost always available
-        elif field in ['Lab_Results', 'Hemoglobin', 'White_Blood_Cells']:
-            availability = 0.85  # Usually available
-        elif field in ['Imaging', 'CT_Scan', 'MRI']:
-            availability = 0.70  # Sometimes available
-        elif field in ['Pathology', 'Biopsy_Results']:
-            availability = 0.60  # Less frequently available
-        elif field in ['Follow_up', 'Response']:
-            availability = 0.40  # Often missing
-        else:
-            availability = 0.75  # Default availability
-        
-        # Generate availability for this field
-        field_availability = np.random.binomial(1, availability, num_patients)
-        availability_matrix.append(field_availability)
-        
-        # Generate actual data values for available fields
-        field_values = []
-        for i, patient_id in enumerate(patient_ids):
-            if field_availability[i] == 1:  # Data available
-                # Generate realistic dummy values based on field type
-                if field in ['Age']:
-                    field_values.append(np.random.randint(18, 90))
-                elif field in ['Gender']:
-                    field_values.append(np.random.choice(['Male', 'Female']))
-                elif field in ['BMI']:
-                    field_values.append(round(np.random.normal(25, 5), 1))
-                elif field in ['Hypertension', 'Diabetes', 'Heart_Disease']:
-                    field_values.append(np.random.choice(['Yes', 'No']))
-                elif field in ['Response']:
-                    field_values.append(np.random.choice(['Complete Response', 'Partial Response', 'Stable Disease', 'Progressive Disease']))
-                elif field in ['Survival_Status']:
-                    field_values.append(np.random.choice(['Alive', 'Deceased']))
-                elif field in ['Tumor_Grade']:
-                    field_values.append(np.random.choice(['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4']))
-                elif field in ['Tumor_Stage']:
-                    field_values.append(np.random.choice(['Stage I', 'Stage II', 'Stage III', 'Stage IV']))
-                elif field in ['Hemoglobin']:
-                    field_values.append(round(np.random.normal(12.5, 2), 1))
-                elif field in ['White_Blood_Cells']:
-                    field_values.append(round(np.random.normal(7.5, 2), 1))
-                elif field in ['Platelets']:
-                    field_values.append(int(np.random.normal(250, 50)))
-                else:
-                    # Default to binary Yes/No for other fields
-                    field_values.append(np.random.choice(['Yes', 'No']))
-            else:
-                field_values.append(np.nan)  # Missing data
-        
-        actual_data[field] = field_values
-    
-    # Convert availability to DataFrame
-    availability_df = pd.DataFrame(availability_matrix, index=clinical_fields, columns=patient_ids)
-    
-    # Convert actual data to DataFrame
-    actual_df = pd.DataFrame(actual_data, index=patient_ids).T
-    
-    return availability_df, actual_df, clinical_fields_colors, site_info
+
 
 def create_availability_heatmap(df, field_colors, site_info, actual_data_df=None):
     """Create an interactive heatmap showing data availability with characteristic colors"""
     
     # Determine if we're using real cohort data or dummy data
     if len(site_info) == len(df.columns):
-        # Real data: group by actual cohorts
-        unique_sites = list(set(site_info))
-        sites = sorted(unique_sites)  # Sort for consistent ordering
+        # Real data: extract cohorts from unique case IDs in DataFrame columns
+        # DataFrame columns are like "cohort1_case123", so extract the cohort part
+        column_cohorts = [col.split('_')[0] for col in df.columns]
+        unique_sites = sorted(list(set(column_cohorts)))  # Sort for consistent ordering
+        sites = unique_sites
         
-        # Group patients by their actual cohort
+        # Reorder DataFrame columns by cohort for proper visual grouping
+        ordered_columns = []
+        for site in sites:
+            site_patients = [col for col in df.columns if col.startswith(f"{site}_")]
+            site_patients.sort()  # Sort within each cohort for consistency
+            ordered_columns.extend(site_patients)
+        
+        # Reorder the DataFrame
+        df = df[ordered_columns]
+        if actual_data_df is not None:
+            actual_data_df = actual_data_df[ordered_columns]
+        
+        # Now calculate site positions based on the reordered DataFrame
         site_positions = {}
         current_pos = 0
         
         for site in sites:
-            site_patients = [df.columns[i] for i, cohort in enumerate(site_info) if cohort == site]
+            # Find all columns that belong to this cohort in the reordered DataFrame
+            site_patients = [col for col in df.columns if col.startswith(f"{site}_")]
             if site_patients:
                 site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
                 current_pos += len(site_patients)
@@ -186,38 +83,77 @@ def create_availability_heatmap(df, field_colors, site_info, actual_data_df=None
                 site_positions[site] = (current_pos, current_pos + len(site_patients) - 1)
                 current_pos += len(site_patients)
     
-    # Create the figure using subplots approach for better control
-    fig = make_subplots(rows=1, cols=1)
-    
-    # Create separate heatmap for each field to get custom colors
+    # Create custom hover text for all cells
+    hover_text = []
     for i, field in enumerate(df.index):
-        if field not in field_colors:
-            continue
-        field_color = field_colors[field]
-        
-        # Get data for this field (row)
-        field_data = df.loc[field].values
-        
-        # Simple hover info
-        hover_info = []
-        for j, val in enumerate(field_data):
+        row_hover = []
+        for j, val in enumerate(df.iloc[i]):
             patient = df.columns[j]
+            # Extract cohort and case_id from unique case ID
+            if '_' in patient:
+                cohort = patient.split('_')[0]
+                case_id = '_'.join(patient.split('_')[1:])  # Join in case case_id has underscores
+                patient_display = f"{case_id} (Cohort: {cohort})"
+            else:
+                patient_display = patient
             status = "Available" if val == 1 else "Missing"
-            hover_info.append(f'<b>Field:</b> {field}<br><b>Patient:</b> {patient}<br><b>Status:</b> {status}')
+            row_hover.append(f'<b>Field:</b> {field}<br><b>Patient:</b> {patient_display}<br><b>Status:</b> {status}')
+        hover_text.append(row_hover)
+    
+    # Create a single heatmap with custom colors using RGB mapping
+    # We'll map field types to different RGB values and create a custom colorscale
+    
+    # Create a color-coded matrix where each field gets a unique color range
+    field_list = list(df.index)
+    color_matrix = np.zeros_like(df.values, dtype=float)
+    
+    # Assign color codes based on field types
+    field_type_codes = {}
+    unique_field_types = []
+    
+    for field in field_list:
+        if 'WSI' in field or 'Slide' in field:
+            field_type = 'sample'
+        else:
+            field_type = 'clinical'
         
-        # Create custom colorscale for this field
-        colorscale = [[0, '#000000'], [1, field_color]]  # Black to field color
-        
-        fig.add_trace(go.Heatmap(
-            z=[field_data],  # Single row
-            x=df.columns,
-            y=[field],  # Single field name
-            colorscale=colorscale,
-            showscale=False,
-            hoverongaps=False,
-            hovertemplate='%{customdata}<extra></extra>',
-            customdata=[hover_info]
-        ))
+        if field_type not in unique_field_types:
+            unique_field_types.append(field_type)
+        field_type_codes[field] = unique_field_types.index(field_type)
+    
+    # Create the color matrix
+    for i, field in enumerate(field_list):
+        base_code = field_type_codes[field] * 10  # Separate field types by 10
+        color_matrix[i] = np.where(df.iloc[i] == 1, base_code + 1, base_code)  # +1 for available, +0 for missing
+    
+    # Create colorscale for different field types
+    if 'sample' in unique_field_types and 'clinical' in unique_field_types:
+        # Both clinical and sample data
+        colorscale = [
+            [0.0, '#000000'],    # Clinical missing (black)
+            [0.125, '#1f77b4'],  # Clinical available (blue)
+            [0.25, '#000000'],   # Gap
+            [0.875, '#000000'],  # Sample missing (black)  
+            [1.0, '#9467bd']     # Sample available (purple)
+        ]
+    else:
+        # Only clinical data
+        colorscale = [
+            [0.0, '#000000'],    # Missing (black)
+            [1.0, '#1f77b4']     # Available (blue)
+        ]
+    
+    # Create the figure
+    fig = go.Figure(data=go.Heatmap(
+        z=color_matrix,
+        x=df.columns,
+        y=df.index,
+        colorscale=colorscale,
+        showscale=False,
+        hoverongaps=False,
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_text
+    ))
     
     # Add vertical lines to separate sites
     shapes = []
@@ -240,16 +176,18 @@ def create_availability_heatmap(df, field_colors, site_info, actual_data_df=None
         },
         xaxis=dict(
             title="Patients (grouped by site)",
-            tickangle=45,
+            showticklabels=False,  # Hide case ID labels to reduce clutter
             side='bottom'
         ),
         yaxis=dict(
             title="Clinical Fields",
-            autorange='reversed'  # Keep fields in original order
+            autorange='reversed',  # Keep fields in original order
+            dtick=1,  # Force one tick per field
+            tickmode='linear'  # Ensure linear spacing
         ),
         width=1400,
-        height=800,
-        margin=dict(l=200, r=100, t=100, b=150),
+        height=max(600, 30 * len(df.index)),  # Dynamic height based on number of fields
+        margin=dict(l=200, r=100, t=100, b=50),
         shapes=shapes
     )
     
@@ -291,7 +229,128 @@ def calculate_statistics(df):
         'field_completeness': field_completeness
     }
 
-def load_real_csv_data(csv_path, subsample_size=None):
+def load_sample_mapping_data(mapping_path, sample_type="Sample", clinical_df=None):
+    """Load sample mapping data (e.g., WSI slides) and return case_id mapping with cohort awareness"""
+    
+    try:
+        # Load the mapping CSV file
+        mapping_df = pd.read_csv(mapping_path)
+        
+        # Check if we have case_id column
+        if 'case_id' not in mapping_df.columns:
+            st.error(f"Sample mapping file must contain 'case_id' column")
+            return None, None, None
+        
+        # Convert case_id to string for consistency
+        mapping_df['case_id'] = mapping_df['case_id'].astype(str)
+        
+        # Check if the mapping file already has cohort information
+        if 'cohort' in mapping_df.columns:
+            # Use the cohort information directly from the mapping file (more reliable)
+            # Create unique identifier combining cohort and case_id
+            mapping_df['unique_case_id'] = mapping_df['cohort'].astype(str) + '_' + mapping_df['case_id'].astype(str)
+            
+            # Group by unique case ID
+            groupby_column = 'unique_case_id'
+            
+            # Also create mapping from unique_case_id back to original case_id for display
+            unique_to_original = dict(zip(mapping_df['unique_case_id'], mapping_df['case_id']))
+            
+            st.sidebar.info(f"ℹ️ {sample_type}: Using cohort info from mapping file")
+            
+        elif clinical_df is not None and 'cohort' in clinical_df.columns:
+            # Fallback: Create a lookup dictionary for case_id -> cohort from clinical data
+            # Note: This can be problematic if case_ids are not unique across cohorts
+            clinical_df['case_id'] = clinical_df['case_id'].astype(str)
+            case_to_cohort = dict(zip(clinical_df['case_id'], clinical_df['cohort']))
+            
+            # Add cohort information to mapping data
+            mapping_df['cohort'] = mapping_df['case_id'].map(case_to_cohort)
+            
+            # Create unique identifier combining cohort and case_id
+            mapping_df['unique_case_id'] = mapping_df['cohort'].astype(str) + '_' + mapping_df['case_id'].astype(str)
+            
+            # Group by unique case ID
+            groupby_column = 'unique_case_id'
+            
+            # Also create mapping from unique_case_id back to original case_id for display
+            unique_to_original = dict(zip(mapping_df['unique_case_id'], mapping_df['case_id']))
+            
+            st.sidebar.warning(f"⚠️ {sample_type}: Using cohort mapping from clinical data (may have conflicts)")
+            
+        else:
+            # Fallback to original case_id if no cohort info available
+            mapping_df['unique_case_id'] = mapping_df['case_id']
+            groupby_column = 'case_id'
+            unique_to_original = dict(zip(mapping_df['case_id'], mapping_df['case_id']))
+            
+            st.sidebar.warning(f"⚠️ {sample_type}: No cohort info found, using case_id only")
+        
+        # Group by the appropriate column to count samples per case
+        sample_counts = mapping_df.groupby(groupby_column).size().reset_index(name='sample_count')
+        sample_counts.rename(columns={groupby_column: 'unique_case_id'}, inplace=True)
+        
+        # Also store the actual sample IDs for each case
+        sample_details = mapping_df.groupby(groupby_column).apply(
+            lambda x: x.iloc[:, 1].tolist() if len(x.columns) > 1 else []
+        ).to_dict()
+        
+        return sample_counts, sample_details, mapping_df, unique_to_original
+        
+    except Exception as e:
+        st.error(f"Error loading sample mapping file: {str(e)}")
+        return None, None, None, None
+
+def integrate_sample_data(availability_df, actual_df, field_colors, sample_mappings):
+    """Integrate sample data into the clinical availability matrix"""
+    
+    if not sample_mappings:
+        return availability_df, actual_df, field_colors
+    
+    # Create a copy to avoid modifying original data
+    new_availability_df = availability_df.copy()
+    new_actual_df = actual_df.copy()
+    new_field_colors = field_colors.copy()
+    
+    # Define colors for different sample types
+    sample_colors = {
+        'WSI_Slides': '#9B59B6',          # Purple - WSI
+        'Proteomics_Samples': '#E67E22',   # Orange - Proteomics
+        'Genomics_Samples': '#27AE60',     # Green - Genomics
+        'Pathology_Samples': '#F39C12',    # Yellow - Pathology
+        'Sample_Count': '#8E44AD'          # Dark Purple - Count
+    }
+    
+    for sample_type, (sample_counts, sample_details, raw_mapping, unique_to_original) in sample_mappings.items():
+        # Create availability row for this sample type
+        sample_availability = []
+        sample_values = []
+        
+        for case_id in availability_df.columns:
+            # Try to find samples using the unique case ID (which might be cohort_case_id format)
+            case_samples = sample_counts[sample_counts['unique_case_id'] == case_id]
+            if not case_samples.empty and case_samples['sample_count'].iloc[0] > 0:
+                sample_availability.append(1)
+                sample_values.append(int(case_samples['sample_count'].iloc[0]))
+            else:
+                sample_availability.append(0)
+                sample_values.append(0)
+        
+        # Add to availability matrix
+        sample_field_name = f"{sample_type}_Available"
+        new_availability_df.loc[sample_field_name] = sample_availability
+        new_actual_df.loc[sample_field_name] = sample_values
+        
+        # Add color for this sample type
+        if sample_type in sample_colors:
+            new_field_colors[sample_field_name] = sample_colors[sample_type]
+        else:
+            # Generate a color if not predefined
+            new_field_colors[sample_field_name] = f"#{random.randint(0,255):02x}{random.randint(0,255):02x}{random.randint(0,255):02x}"
+    
+    return new_availability_df, new_actual_df, new_field_colors
+
+def load_real_csv_data(csv_path, subsample_size=None, sample_mappings_config=None):
     """Load real clinical data from CSV file and convert to availability matrix format"""
     
     try:
@@ -305,6 +364,9 @@ def load_real_csv_data(csv_path, subsample_size=None):
         # Extract case IDs and cohort information
         case_ids = df['case_id'].astype(str)
         cohorts = df['cohort']
+        
+        # Create unique case identifiers combining cohort and case_id to handle duplicate case_ids across cohorts
+        unique_case_ids = cohorts.astype(str) + '_' + case_ids.astype(str)
         
         # Get clinical fields (exclude case_id and cohort columns)
         clinical_fields = [col for col in df.columns if col not in ['case_id', 'cohort']]
@@ -343,18 +405,54 @@ def load_real_csv_data(csv_path, subsample_size=None):
             availability_matrix.append(availability)
             actual_data[field] = values
         
-        # Convert to DataFrames
-        availability_df = pd.DataFrame(availability_matrix, index=clinical_fields, columns=case_ids)
-        actual_df = pd.DataFrame(actual_data, index=case_ids).T
+        # Convert to DataFrames using unique case IDs as columns
+        availability_df = pd.DataFrame(availability_matrix, index=clinical_fields, columns=unique_case_ids)
+        actual_df = pd.DataFrame(actual_data, index=unique_case_ids).T
+        
+        # Load and integrate sample mapping data
+        sample_mappings = {}
+        if sample_mappings_config:
+            for sample_type, mapping_path in sample_mappings_config.items():
+                if mapping_path and os.path.exists(mapping_path):
+                    result = load_sample_mapping_data(mapping_path, sample_type, df)  # Pass clinical df for cohort-aware merging
+                    if result[0] is not None:
+                        sample_counts, sample_details, raw_mapping, unique_to_original = result
+                        sample_mappings[sample_type] = (sample_counts, sample_details, raw_mapping, unique_to_original)
+                        
+                        # Show detailed merge statistics
+                        total_samples = len(raw_mapping)
+                        unique_cases = len(sample_counts)
+                        
+                        # Use cohort information from the processed mapping data
+                        if 'cohort' in raw_mapping.columns:
+                            cohort_breakdown = raw_mapping['cohort'].value_counts().to_dict()
+                        else:
+                            cohort_breakdown = {"Unknown": total_samples}
+                        
+                        success_msg = f"✅ Loaded {sample_type}: {total_samples} samples for {unique_cases} unique patients"
+                        cohort_details = ", ".join([f"{k}:{v}" for k, v in cohort_breakdown.items()])
+                        st.sidebar.success(f"{success_msg}")
+                        st.sidebar.info(f"📊 Sample distribution: {cohort_details}")
+                        
+                        # Debug: Show specific cohort merge success by counting unique case IDs
+                        for cohort, sample_count in cohort_breakdown.items():
+                            cohort_cases = sample_counts[sample_counts['unique_case_id'].str.startswith(f"{cohort}_")]
+                            st.sidebar.info(f"🔗 {cohort}: {len(cohort_cases)} patients with {sample_type}")
+        
+        # Integrate sample data into availability matrix
+        if sample_mappings:
+            availability_df, actual_df, field_colors = integrate_sample_data(
+                availability_df, actual_df, field_colors, sample_mappings
+            )
         
         # Create site information from cohorts
         site_info = cohorts.tolist()
         
-        return availability_df, actual_df, field_colors, site_info, cohorts.unique()
+        return availability_df, actual_df, field_colors, site_info, cohorts.unique(), sample_mappings
         
     except Exception as e:
         st.error(f"Error loading CSV file: {str(e)}")
-        return None, None, None, None, None
+        return None, None, None, None, None, None
 
 def main():
     # Header
@@ -364,43 +462,81 @@ def main():
     # Sidebar
     st.sidebar.header("Configuration")
     
-    # Data loading options
-    data_source = st.sidebar.selectbox(
-        "Data Source",
-        ["Generate Dummy Data", "Load from Directory", "Load Real CSV Data"],
-        help="Choose how to load the clinical data"
+    # Data loading - Real CSV Data
+    st.sidebar.subheader("📁 Clinical Data")
+    
+    # Check if user wants directory loading instead
+    use_directory = st.sidebar.checkbox(
+        "Load from Directory (experimental)", 
+        value=False, 
+        help="Load data from directory structure instead of CSV files"
     )
     
-    if data_source == "Generate Dummy Data":
-        num_patients = st.sidebar.slider(
-            "Number of Patients",
-            min_value=10,
-            max_value=200,
-            value=50,
-            step=10,
-            help="Number of patients to generate for demonstration"
-        )
-        
-        # Generate or load cached data
-        if 'cohort_data' not in st.session_state or st.sidebar.button("Regenerate Data"):
-            with st.spinner("Generating dummy clinical data..."):
-                availability_df, actual_df, field_colors, site_info = generate_dummy_data(num_patients)
-                st.session_state.cohort_data = availability_df
-                st.session_state.actual_data = actual_df
-                st.session_state.field_colors = field_colors
-                st.session_state.site_info = site_info
-        
-        df = st.session_state.cohort_data
-        actual_data_df = st.session_state.actual_data
-        field_colors = st.session_state.field_colors
-        site_info = st.session_state.site_info
-        
-    elif data_source == "Load Real CSV Data":
+    if not use_directory:
         csv_path = st.sidebar.text_input(
             "CSV File Path",
             value="/tank/WSI_data/Ovarian_WSIs/OV_master/master_cohort.csv",
             help="Path to the CSV file containing clinical data"
         )
+        
+        # Sample mapping configuration
+        st.sidebar.subheader("📊 Sample Data Integration")
+        
+        # Enable sample mapping
+        enable_sample_mapping = st.sidebar.checkbox(
+            "Include Sample Data",
+            value=True,
+            help="Load and integrate sample mapping data (e.g., WSI slides, proteomics samples)"
+        )
+        
+        sample_mappings_config = {}
+        if enable_sample_mapping:
+            # WSI Slides mapping
+            wsi_mapping_path = st.sidebar.text_input(
+                "WSI Slides Mapping CSV",
+                value="/tank/WSI_data/Ovarian_WSIs/OV_master/master_WSI_mappings.csv",
+                help="Path to CSV mapping case_id to WSI slides"
+            )
+            if wsi_mapping_path.strip():
+                sample_mappings_config["WSI_Slides"] = wsi_mapping_path
+            
+            # Add more sample types
+            with st.sidebar.expander("➕ Additional Sample Types", expanded=False):
+                # Proteomics samples
+                proteomics_path = st.sidebar.text_input(
+                    "Proteomics Samples CSV",
+                    value="",
+                    placeholder="/path/to/proteomics_mapping.csv",
+                    help="Path to CSV mapping case_id to proteomics samples"
+                )
+                if proteomics_path.strip():
+                    sample_mappings_config["Proteomics_Samples"] = proteomics_path
+                
+                # Genomics samples
+                genomics_path = st.sidebar.text_input(
+                    "Genomics Samples CSV",
+                    value="",
+                    placeholder="/path/to/genomics_mapping.csv",
+                    help="Path to CSV mapping case_id to genomics samples"
+                )
+                if genomics_path.strip():
+                    sample_mappings_config["Genomics_Samples"] = genomics_path
+                
+                # Custom sample type
+                custom_name = st.sidebar.text_input(
+                    "Custom Sample Type Name",
+                    value="",
+                    placeholder="e.g., Pathology_Samples",
+                    help="Name for custom sample type"
+                )
+                custom_path = st.sidebar.text_input(
+                    "Custom Sample Type CSV",
+                    value="",
+                    placeholder="/path/to/custom_mapping.csv",
+                    help="Path to CSV for custom sample type"
+                )
+                if custom_name.strip() and custom_path.strip():
+                    sample_mappings_config[custom_name] = custom_path
         
         # Add subsample option for testing
         subsample_data = st.sidebar.checkbox(
@@ -421,31 +557,53 @@ def main():
         else:
             subsample_size = None
         
+        # Debug option to clear cache
+        if st.sidebar.button("🗑️ Clear Cache & Reload", help="Force reload all data and clear cache"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.sidebar.success("Cache cleared! Data will reload.")
+            st.rerun()
+        
         if csv_path and os.path.exists(csv_path):
             st.sidebar.success("CSV file found!")
             
             # Check if we need to load/reload the data
-            if ('cohort_data' not in st.session_state or 
+            config_changed = (
+                'cohort_data' not in st.session_state or 
                 'csv_path' not in st.session_state or 
                 st.session_state.get('csv_path') != csv_path or 
                 st.session_state.get('subsample_size') != subsample_size or
-                st.sidebar.button("Reload CSV Data")):
+                st.session_state.get('sample_mappings_config') != sample_mappings_config
+            )
+            
+            if config_changed or st.sidebar.button("Reload CSV Data"):
                 
-                with st.spinner("Loading real clinical data..."):
-                    # Load real CSV data
-                    result = load_real_csv_data(csv_path, subsample_size)
+                with st.spinner("Loading real clinical data and sample mappings..."):
+                    # Load real CSV data with sample mappings
+                    result = load_real_csv_data(csv_path, subsample_size, sample_mappings_config)
                     
                     if result[0] is not None:  # Check if loading was successful
-                        availability_df, actual_df, field_colors, site_info, cohorts = result
+                        availability_df, actual_df, field_colors, site_info, cohorts, sample_mappings = result
                         st.session_state.cohort_data = availability_df
                         st.session_state.actual_data = actual_df
                         st.session_state.field_colors = field_colors
                         st.session_state.site_info = site_info
                         st.session_state.cohorts = cohorts
+                        st.session_state.sample_mappings = sample_mappings
                         st.session_state.csv_path = csv_path
                         st.session_state.subsample_size = subsample_size
-                        sample_text = f" (subsampled from {1031})" if subsample_size else ""
-                        st.sidebar.success(f"✅ Loaded {len(availability_df.columns)} patients{sample_text} with {len(availability_df.index)} clinical fields!")
+                        st.session_state.sample_mappings_config = sample_mappings_config
+                        
+                        # Count clinical vs sample fields
+                        clinical_fields = [f for f in availability_df.index if not f.endswith('_Available')]
+                        sample_fields = [f for f in availability_df.index if f.endswith('_Available')]
+                        
+                        sample_text = f" (subsampled)" if subsample_size else ""
+                        success_msg = f"✅ Loaded {len(availability_df.columns)} patients{sample_text}"
+                        success_msg += f" with {len(clinical_fields)} clinical fields"
+                        if sample_fields:
+                            success_msg += f" + {len(sample_fields)} sample types"
+                        st.sidebar.success(success_msg)
                     else:
                         st.sidebar.error("Failed to load CSV data")
                         # Fallback to dummy data
@@ -454,6 +612,7 @@ def main():
                         st.session_state.actual_data = actual_df
                         st.session_state.field_colors = field_colors
                         st.session_state.site_info = site_info
+                        st.session_state.sample_mappings = {}
             
             # Use cached data
             df = st.session_state.cohort_data
@@ -462,20 +621,11 @@ def main():
             site_info = st.session_state.site_info
             
         else:
-            st.sidebar.warning("Please provide a valid CSV file path")
-            # Use dummy data as fallback
-            if 'cohort_data' not in st.session_state:
-                availability_df, actual_df, field_colors, site_info = generate_dummy_data(20)
-                st.session_state.cohort_data = availability_df
-                st.session_state.actual_data = actual_df
-                st.session_state.field_colors = field_colors
-                st.session_state.site_info = site_info
+            st.sidebar.error("❌ Please provide a valid CSV file path to continue")
+            st.stop()  # Stop execution until valid path is provided
             
-            df = st.session_state.cohort_data
-            actual_data_df = st.session_state.actual_data
-            field_colors = st.session_state.field_colors
-            site_info = st.session_state.site_info
     else:
+        # Directory loading (experimental)
         data_directory = st.sidebar.text_input(
             "Data Directory Path",
             placeholder="/path/to/clinical/data",
@@ -484,23 +634,11 @@ def main():
         
         if data_directory and os.path.exists(data_directory):
             st.sidebar.success("Directory found!")
-            # For now, fall back to dummy data
-            # In a real implementation, you would load actual data here
-            if 'cohort_data' not in st.session_state:
-                availability_df, actual_df, field_colors, site_info = generate_dummy_data(50)
-                st.session_state.cohort_data = availability_df
-                st.session_state.actual_data = actual_df
-                st.session_state.field_colors = field_colors
-                st.session_state.site_info = site_info
-            df = st.session_state.cohort_data
-            actual_data_df = st.session_state.actual_data
-            field_colors = st.session_state.field_colors
-            site_info = st.session_state.site_info
+            st.sidebar.info("Directory loading not yet implemented. Please use CSV file loading.")
+            st.stop()
         else:
-            st.sidebar.warning("Please provide a valid directory path")
-            availability_df, actual_df, field_colors, site_info = generate_dummy_data(20)  # Small default dataset
-            df = availability_df
-            actual_data_df = actual_df
+            st.sidebar.error("❌ Please provide a valid directory path")
+            st.stop()
     
     # Calculate statistics
     stats = calculate_statistics(df)
@@ -523,9 +661,10 @@ def main():
     with col3:
         # Count patients per site/cohort
         if 'site_info' in st.session_state and len(st.session_state.site_info) == len(df.columns):
-            # Real data: count by actual cohorts
+            # Real data: extract cohorts from DataFrame column names (unique case IDs)
             site_counts = {}
-            for cohort in st.session_state.site_info:
+            for col in df.columns:
+                cohort = col.split('_')[0]  # Extract cohort from unique case ID
                 site_counts[cohort] = site_counts.get(cohort, 0) + 1
             
             # Create delta string for real cohorts
@@ -554,30 +693,25 @@ def main():
     with col2:
         st.subheader("Field Color Legend")
         
-        # Check if we have real data or dummy data
-        if data_source == "Load Real CSV Data" and 'field_colors' in st.session_state:
-            # Real data: show actual fields
-            st.write("**Clinical Fields:**")
-            for field in df.index:
-                if field in field_colors:
-                    st.markdown(f'<div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
-        else:
-            # Dummy data: show grouped fields
-            color_groups = {
-                "Demographics": ["Demographics", "Age", "Gender", "BMI"],
-                "Medical History": ["Medical_History", "Hypertension", "Diabetes", "Heart_Disease"],
-                "Lab Results": ["Lab_Results", "Hemoglobin", "White_Blood_Cells", "Platelets"],
-                "Imaging": ["Imaging", "CT_Scan", "MRI", "X_Ray"],
-                "Pathology": ["Pathology", "Biopsy_Results", "Tumor_Grade", "Tumor_Stage"],
-                "Treatment": ["Treatment", "Surgery", "Chemotherapy", "Radiation"],
-                "Follow-up": ["Follow_up", "Response", "Survival_Status", "Last_Visit"]
-            }
+        # Show clinical and sample fields separately
+        if 'field_colors' in st.session_state:
+            clinical_fields = [f for f in df.index if not f.endswith('_Available')]
+            sample_fields = [f for f in df.index if f.endswith('_Available')]
             
-            for group_name in color_groups:
-                with st.expander(f"{group_name} Fields"):
-                    for field in color_groups[group_name]:
-                        if field in field_colors:
-                            st.markdown(f'<div style="display: flex; align-items: center;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
+            if clinical_fields:
+                st.write("**Clinical Fields:**")
+                for field in clinical_fields:
+                    if field in field_colors:
+                        st.markdown(f'<div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{field}</div>', unsafe_allow_html=True)
+            
+            if sample_fields:
+                st.write("**Sample Data Types:**")
+                for field in sample_fields:
+                    if field in field_colors:
+                        display_name = field.replace('_Available', '').replace('_', ' ')
+                        st.markdown(f'<div style="display: flex; align-items: center; margin-bottom: 5px;"><div style="width: 20px; height: 20px; background-color: {field_colors[field]}; margin-right: 10px; border: 1px solid #ccc;"></div>{display_name}</div>', unsafe_allow_html=True)
+        else:
+            st.info("Load clinical data to see field legend")
     
     with col1:
         # Create and display the heatmap
@@ -592,19 +726,75 @@ def main():
     
     # Cohort Builder
     st.subheader("🔬 Cohort Builder")
-    st.write("Select clinical fields to create a cohort of patients with complete data for **ALL** selected criteria:")
+    st.write("Select clinical fields and sample types to create a cohort of patients with complete data for **ALL** selected criteria:")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Multi-select for clinical fields
-        available_fields = list(df.index)
-        selected_fields = st.multiselect(
-            "Select Clinical Fields (patients must have data for ALL selected fields):",
-            options=available_fields,
-            default=[],
-            help="Choose multiple fields to create a cohort with complete data for all selected criteria"
-        )
+        # Separate clinical fields from sample fields
+        clinical_fields = [f for f in df.index if not f.endswith('_Available')]
+        sample_fields = [f for f in df.index if f.endswith('_Available')]
+        
+        # Create tabs for different selection types
+        tab1, tab2, tab3 = st.tabs(["🩺 Clinical Data", "🔬 Sample Data", "📋 Combined Selection"])
+        
+        with tab1:
+            selected_clinical_fields = st.multiselect(
+                "Select Clinical Fields:",
+                options=clinical_fields,
+                default=[],
+                help="Choose clinical data fields for cohort filtering",
+                key="clinical_fields_select"
+            )
+        
+        with tab2:
+            if sample_fields:
+                selected_sample_fields = st.multiselect(
+                    "Select Sample Types:",
+                    options=sample_fields,
+                    default=[],
+                    help="Choose sample types that must be available for each patient",
+                    key="sample_fields_select"
+                )
+                
+                # Show sample details if available
+                if 'sample_mappings' in st.session_state and st.session_state.sample_mappings:
+                    with st.expander("📊 Sample Data Summary", expanded=False):
+                        for sample_type, (sample_counts, sample_details, raw_mapping, unique_to_original) in st.session_state.sample_mappings.items():
+                            total_samples = len(raw_mapping)
+                            cases_with_samples = len(sample_counts)
+                            avg_samples_per_case = sample_counts['sample_count'].mean()
+                            
+                            st.write(f"**{sample_type}:**")
+                            st.write(f"• Total samples: {total_samples}")
+                            st.write(f"• Cases with samples: {cases_with_samples}")
+                            st.write(f"• Avg samples per case: {avg_samples_per_case:.1f}")
+                            st.write("---")
+            else:
+                st.info("No sample data loaded. Enable 'Include Sample Data' in the sidebar to add sample types.")
+                selected_sample_fields = []
+        
+        with tab3:
+            # Combined selection
+            all_available_fields = clinical_fields + sample_fields
+            selected_fields = st.multiselect(
+                "Select All Fields (Clinical + Sample):",
+                options=all_available_fields,
+                default=[],
+                help="Choose from both clinical fields and sample types for comprehensive filtering",
+                key="combined_fields_select"
+            )
+            
+            # Merge selections from individual tabs
+            if 'selected_clinical_fields' in locals() and 'selected_sample_fields' in locals():
+                combined_from_tabs = selected_clinical_fields + selected_sample_fields
+                if combined_from_tabs and not selected_fields:
+                    selected_fields = combined_from_tabs
+                    st.info(f"Auto-combined {len(selected_clinical_fields)} clinical + {len(selected_sample_fields)} sample fields")
+        
+        # Use the selected fields for cohort building
+        if 'selected_fields' not in locals():
+            selected_fields = []
         
         if selected_fields:
             # Filter patients who have data for ALL selected fields
@@ -630,10 +820,9 @@ def main():
                 # Show cohort composition by site/cohort
                 site_breakdown = {}
                 if 'site_info' in st.session_state and len(st.session_state.site_info) == len(df.columns):
-                    # Real data: group by actual cohorts
+                    # Real data: extract cohorts from unique case IDs
                     for patient in cohort_patients:
-                        patient_idx = list(df.columns).index(patient)
-                        cohort = st.session_state.site_info[patient_idx]
+                        cohort = patient.split('_')[0]  # Extract cohort from unique case ID
                         site_breakdown[cohort] = site_breakdown.get(cohort, 0) + 1
                 else:
                     # Dummy data: use original logic
@@ -645,10 +834,36 @@ def main():
                 for site, count in sorted(site_breakdown.items()):
                     st.write(f"• {site}: {count} patients")
                 
+                # Show sample data summary for the cohort
+                sample_selected = [f for f in selected_fields if f.endswith('_Available')]
+                if sample_selected and 'sample_mappings' in st.session_state:
+                    st.write("**Sample Data in Cohort:**")
+                    for sample_field in sample_selected:
+                        sample_type = sample_field.replace('_Available', '')
+                        if sample_type in st.session_state.sample_mappings:
+                            sample_counts, sample_details, raw_mapping, unique_to_original = st.session_state.sample_mappings[sample_type]
+                            
+                            # Count samples for cohort patients
+                            cohort_sample_count = 0
+                            for patient in cohort_patients:
+                                patient_samples = sample_counts[sample_counts['unique_case_id'] == patient]
+                                if not patient_samples.empty:
+                                    cohort_sample_count += patient_samples['sample_count'].iloc[0]
+                            
+                            st.write(f"• {sample_type}: {cohort_sample_count} total samples across {len(cohort_patients)} patients")
+                
                 # Generate structured filename
-                filename_fields = "_".join(selected_fields).replace(" ", "")
+                clinical_part = "_".join([f for f in selected_fields if not f.endswith('_Available')]).replace(" ", "")
+                sample_part = "_".join([f.replace('_Available', '') for f in selected_fields if f.endswith('_Available')]).replace(" ", "")
+                
+                filename_parts = []
+                if clinical_part:
+                    filename_parts.append(f"Clinical_{clinical_part}")
+                if sample_part:
+                    filename_parts.append(f"Samples_{sample_part}")
+                
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                suggested_filename = f"Cohort_{filename_fields}_{timestamp}"
+                suggested_filename = f"Cohort_{'_'.join(filename_parts)}_{timestamp}" if filename_parts else f"Cohort_{timestamp}"
                 
                 st.write("**Selected Patients:**")
                 patients_display = ", ".join(cohort_patients[:10])
@@ -761,19 +976,83 @@ def main():
             # Export format and download in one step
             col_csv, col_json, col_excel = st.columns(3)
             
-            # Create the export dataframe with actual values
-            export_df = actual_data_df[cohort_patients].loc[selected_fields]
+            # Create the export dataframe - EXPLODED so each sample gets its own row
+            export_rows = []
             
-            # Apply field mappings if any exist
+            # Get clinical and sample field selections
+            clinical_fields_selected = [f for f in selected_fields if not f.endswith('_Available')]
+            sample_fields_selected = [f for f in selected_fields if f.endswith('_Available')]
+            
+            for case_id in cohort_patients:
+                # Get clinical data for this case
+                case_clinical_data = {}
+                for field in clinical_fields_selected:
+                    if field in actual_data_df.index:
+                        case_clinical_data[field] = actual_data_df.loc[field, case_id]
+                
+                # If sample fields are selected, explode by samples
+                if sample_fields_selected and 'sample_mappings' in st.session_state:
+                    case_has_samples = False
+                    
+                    for sample_field in sample_fields_selected:
+                        sample_type = sample_field.replace('_Available', '')
+                        if sample_type in st.session_state.sample_mappings:
+                            sample_counts, sample_details, raw_mapping, unique_to_original = st.session_state.sample_mappings[sample_type]
+                            
+                            # Get all samples for this case
+                            case_samples = raw_mapping[raw_mapping['unique_case_id'] == case_id]
+                            
+                            if not case_samples.empty:
+                                case_has_samples = True
+                                # Create one row per sample
+                                for _, sample_row in case_samples.iterrows():
+                                    row_data = {'case_id': case_id}
+                                    row_data.update(case_clinical_data)  # Add clinical data
+                                    row_data[f'{sample_type}_ID'] = sample_row.iloc[0]  # First column is sample ID
+                                    
+                                    # Add other sample metadata if available
+                                    if len(sample_row) > 2:  # More than case_id and sample_id
+                                        for col_idx, col_name in enumerate(case_samples.columns):
+                                            if col_idx > 1:  # Skip case_id and sample_id
+                                                row_data[f'{sample_type}_{col_name}'] = sample_row.iloc[col_idx]
+                                    
+                                    export_rows.append(row_data)
+                    
+                    # If case has no samples but was selected, add one row with empty sample fields
+                    if not case_has_samples:
+                        row_data = {'case_id': case_id}
+                        row_data.update(case_clinical_data)
+                        for sample_field in sample_fields_selected:
+                            sample_type = sample_field.replace('_Available', '')
+                            row_data[f'{sample_type}_ID'] = ""
+                        export_rows.append(row_data)
+                
+                else:
+                    # No sample fields selected, just add clinical data
+                    row_data = {'case_id': case_id}
+                    row_data.update(case_clinical_data)
+                    export_rows.append(row_data)
+            
+            # Create DataFrame from exploded rows
+            export_df = pd.DataFrame(export_rows)
+            
+            # Set case_id as index if no samples, otherwise keep it as a column for clarity
+            if not sample_fields_selected:
+                export_df.set_index('case_id', inplace=True)
+                export_df.index.name = 'case_id'
+            
+            # Apply field mappings if any exist (for clinical fields only)
             for field_key, mapping in st.session_state.get('field_mappings', {}).items():
                 if mapping:  # Only if mapping is not empty
                     field_name = field_key.split('_')[0]  # Extract field name from key
-                    if field_name in export_df.index and len(mapping) > 0:
+                    if field_name in export_df.columns and len(mapping) > 0:
                         # Apply the mapping
-                        export_df.loc[field_name] = export_df.loc[field_name].map(mapping).fillna(export_df.loc[field_name])
+                        export_df[field_name] = export_df[field_name].map(mapping).fillna(export_df[field_name])
             
             with col_csv:
-                csv_content = export_df.to_csv()
+                # Export exploded format - include index only if no samples (case_id is column when samples present)
+                include_index = not sample_fields_selected
+                csv_content = export_df.to_csv(index=include_index)
                 st.download_button(
                     label="📄 CSV",
                     data=csv_content,
@@ -783,7 +1062,12 @@ def main():
                 )
             
             with col_json:
-                json_content = export_df.to_json(orient='records', indent=2)
+                # Use records format - reset index if needed
+                if sample_fields_selected:
+                    json_content = export_df.to_json(orient='records', indent=2)
+                else:
+                    json_content = export_df.reset_index().to_json(orient='records', indent=2)
+                
                 st.download_button(
                     label="📋 JSON",
                     data=json_content,
@@ -795,7 +1079,9 @@ def main():
                 import io
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    export_df.to_excel(writer, sheet_name='Cohort_Data')
+                    # Export exploded format
+                    include_index = not sample_fields_selected
+                    export_df.to_excel(writer, sheet_name='Cohort_Data', index=include_index)
                 excel_content = buffer.getvalue()
                 
                 st.download_button(
@@ -807,8 +1093,33 @@ def main():
             
             # Show preview of exported data
             with st.expander("📋 Data Preview", expanded=False):
-                st.write("First 5 patients from your cohort:")
-                st.dataframe(export_df.iloc[:, :5] if len(export_df.columns) > 5 else export_df)
+                if sample_fields_selected:
+                    st.write("**Exploded Export Format** (One Row Per Sample):")
+                    st.write(f"Total rows in export: **{len(export_df)}** (includes one row per sample)")
+                    
+                    # Count unique cases vs total rows
+                    if 'case_id' in export_df.columns:
+                        unique_cases = export_df['case_id'].nunique()
+                        st.write(f"Unique cases: **{unique_cases}**, Total samples/rows: **{len(export_df)}**")
+                    
+                    # Show sample distribution
+                    sample_cols = [col for col in export_df.columns if col.endswith('_ID') and not col == 'case_id']
+                    if sample_cols:
+                        st.write("**Sample Distribution:**")
+                        for col in sample_cols:
+                            non_empty = export_df[col].replace('', pd.NA).notna().sum()
+                            st.write(f"• {col}: {non_empty} samples with IDs")
+                else:
+                    st.write("**Standard Export Format** (One Row Per Case):")
+                    st.write(f"Total cases in export: **{len(export_df)}**")
+                
+                st.write("**Preview (first 10 rows):**")
+                # Show first 10 rows and limit columns if too many
+                preview_df = export_df.head(10)
+                if len(export_df.columns) > 8:
+                    st.write(f"Showing first 8 of {len(export_df.columns)} columns...")
+                    preview_df = preview_df.iloc[:, :8]
+                st.dataframe(preview_df)
     
     # Data export options
     st.subheader("Export Options")
@@ -848,3 +1159,9 @@ def main():
 
 if __name__ == "__main__":
     main() 
+
+
+
+
+
+# TODO: join the WSI samples in (this needs to be generic for all sample types here...)
